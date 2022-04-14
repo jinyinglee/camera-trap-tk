@@ -111,21 +111,24 @@ details['d_name'] = details['deployments'].apply(lambda x: x.get('name'))
 details['d_id'] = details['deployments'].apply(lambda x: x.get('deployment_id'))
 details = details[['studyarea_id', 'name', 'd_name', 'd_id']]
 
+
 location_map = {
     '新竹': 'HC',
     '嘉義': 'CY',
     '羅東': 'LD',
     '南投': 'NT',
-    '東勢': 'DS'
+    '東勢': 'DS',
+    '花蓮': 'HL'
 }
 
 record_data_length = []
 
 for location in ['新竹', '嘉義', '羅東', '南投', '東勢']:
     df = pd.read_excel(f'/Users/taibif/Documents/01-camera-trap/2020自動相機動物監測整合資料/2020-09~/文字檔/{location}處.xlsx')
+    # TODO 未來要先確認是不是有新的相機位置沒有在資料庫內
     # len(df)
     # len(df.檔名.unique())
-    # 台東 287381 屏東 96920 花蓮 126167
+    # 台東 287381 屏東 96920 花蓮 126167 新竹 136338 嘉義 188061 羅東 78504 南投 156486 東勢 151928
     df['objectID'] = ''
     obj_df = df.groupby(['檔名'], as_index=False)['objectID'].apply(lambda x: bson.objectid.ObjectId())
     df = pd.merge(df.drop(columns=['objectID']), obj_df, on="檔名", how="left")
@@ -134,7 +137,7 @@ for location in ['新竹', '嘉義', '羅東', '南投', '東勢']:
     # remove leadind & trailing white space
     df['物種'] = df['物種'].str.strip()
     df['檔名_mac'] = df['檔名'].replace('F\:', '/Volumes/Transcend', regex=True).replace('\\\\', '/', regex=True)
-    df.to_csv(f'/Users/taibif/Documents/01-camera-trap/2020自動相機動物監測整合資料/2020-09~/{location}-edited.csv', index=False)
+    df.to_csv(f'/Users/taibif/Documents/01-camera-trap/2020自動相機動物監測整合資料/2020-09~/{location}處-edited.csv', index=False)
     # df = pd.read_csv('/Users/taibif/Documents/01-camera-trap/2020自動相機動物監測整合資料/2020-09~/台東處-edited.csv')
     df = df.replace({np.nan: ''})
     df['image_hash'] = ''
@@ -146,8 +149,9 @@ for location in ['新竹', '嘉義', '羅東', '南投', '東勢']:
         df.loc[i, ['image_hash', 'datetime', 'exif']] = get_image_info(df.iloc[i].檔名_mac)
     df['filename'] = df['檔名'].apply(lambda x: x.split('\\')[-1])
     df['folder_name'] = df['檔名'].apply(lambda x: x.split('\\')[-2])
+    df['相機位置'] = df['相機位置'].apply(lambda x: x.strip())
     df = df.rename(columns={'樣區': 'name', '相機位置': 'd_name'})
-    df = df.merge(details)
+    df = df.merge(details, how='left')
     csv_df = df[['filename', 'folder_name', '物種', '性別', '年齡', '備註', 'objectID', 'studyarea_id', 'd_id', 'image_hash', 'datetime']]
     csv_df = csv_df.rename(columns={'檔名': 'filename', '物種': 'species', '性別': 'sex', '年齡': 'life_stage', '備註': 'remarks',
                                     'objectID': 'image_uuid', 'd_id': 'deployment_id'})
@@ -158,18 +162,28 @@ for location in ['新竹', '嘉義', '羅東', '南投', '東勢']:
                     'life_stage', 'sex', 'remarks', 'image_uuid', 'image_hash', 'file_url', 'folder_name']]
     csv_df.to_csv(f'/Users/taibif/Documents/GitHub/ct22-volumes/bucket/{location_map[location]}.csv', index=False)
     info_df = df[['objectID', 'exif']]
-    info_df = info_df.drop_duplicates()
+    info_df = info_df.loc[info_df.objectID.drop_duplicates().index]
     info_df['exif'] = info_df['exif'].apply(lambda x: json.dumps(x))
     info_df['exif'] = info_df['exif'].apply(lambda x: x.replace('\\u0000', '').replace('\\u0001', '').replace('\\u0002', '').replace('\\u0003', ''))
     info_df = info_df.rename(columns={'objectID': 'image_uuid'})
     info_df.to_csv(f'/Users/taibif/Documents/GitHub/ct22-volumes/bucket/{location_map[location]}_info.csv', index=False)
 
+# 台東 287381 屏東 96920 花蓮 126167 新竹 136338
+# 嘉義 188061 羅東 78504 南投 156486 東勢 151928
+
+# TODO 花蓮處要補上缺的資料 ['HL-LTMM-033', 'HL-LTMM-034', 'HL-LTMM-035', 'HL-LTMM-036', 'HL-LTMM-037', 'HL-LTMM-038']
+# TODO 嘉義處
 
 # 資料庫id (taicat_image)
 # 起始 11202970
 # 台東 11572752
 # 屏東 11669672
-
+# 新竹
+# 羅東
+# 南投
+# 東勢
+# 花蓮
+# 嘉義
 
 # PSQL NOTES
 
@@ -177,11 +191,11 @@ for location in ['新竹', '嘉義', '羅東', '南投', '東勢']:
 """
 COPY taicat_image(memo, project_id, studyarea_id, deployment_id, filename, datetime, species, life_stage, sex,
                   remarks, image_uuid, image_hash, file_url, folder_name)
-FROM '/bucket/PT.csv'
+FROM '/bucket/HL.csv'
 DELIMITER ',' CSV HEADER
 
 COPY taicat_image_info(image_uuid, exif)
-FROM '/bucket/PT_info.csv'
+FROM '/bucket/HL_info.csv'
 DELIMITER ',' CSV HEADER
 """
 
@@ -204,3 +218,16 @@ ALTER TABLE taicat_image ALTER COLUMN image_hash SET DEFAULT ''
 alter table taicat_image alter column image_hash drop not null
 ALTER TABLE taicat_image_info ALTER COLUMN source_data SET DEFAULT '{}'
 """
+
+for location in ['台東', '屏東', '花蓮']:
+    df = pd.read_csv(f'/Users/taibif/Documents/01-camera-trap/2020自動相機動物監測整合資料/2020-09~/{location}處-edited.csv')
+    for j in df[['objectID', '檔名_mac']].drop_duplicates().index:
+        p = Path(df.檔名_mac[j])
+        thumb_p = Path(f'/Users/taibif/Documents/01-camera-trap/2020自動相機動物監測整合資料/2020-09~/縮圖/{location}處')
+        oid = df.objectID[j]
+        try:
+            make_thumb(p, thumb_p, oid)
+        except:
+            pass
+        if j % 100 == 0:
+            print(location, j)
