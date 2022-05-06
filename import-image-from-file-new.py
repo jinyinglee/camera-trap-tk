@@ -23,6 +23,7 @@ from botocore.exceptions import ClientError
 import os
 import psycopg2
 from ast import literal_eval
+from boto3.exceptions import S3UploadFailedError
 
 
 THUMB_MAP = (
@@ -82,7 +83,7 @@ def get_image_info(path):
     x = Path(path)
     image_hash, coverted_dt, exif = '', '', '{}'
     try:
-        if str(x)[-3:].lower() not in ['avi', 'mp4']:
+        if str(x)[-3:].lower() not in ['avi', 'mp4', 'mov']:
             img_manager = ImageManager(x)
             exif = img_manager.get_exif()
             image_hash = img_manager.make_hash()
@@ -121,9 +122,10 @@ location_map = {
     '花蓮': 'HL'
 }
 
-record_data_length = []
+record_data_length = [] # for checking results
 
-for location in ['新竹', '嘉義', '羅東', '南投', '東勢']:
+# 整理資料
+for location in location_map.keys():
     df = pd.read_excel(f'/Users/taibif/Documents/01-camera-trap/2020自動相機動物監測整合資料/2020-09~/文字檔/{location}處.xlsx')
     # TODO 未來要先確認是不是有新的相機位置沒有在資料庫內
     # len(df)
@@ -171,55 +173,8 @@ for location in ['新竹', '嘉義', '羅東', '南投', '東勢']:
 # 台東 287381 屏東 96920 花蓮 126167 新竹 136338
 # 嘉義 188061 羅東 78504 南投 156486 東勢 151928
 
-# TODO 花蓮處要補上缺的資料 ['HL-LTMM-033', 'HL-LTMM-034', 'HL-LTMM-035', 'HL-LTMM-036', 'HL-LTMM-037', 'HL-LTMM-038']
-# TODO 嘉義處
-
-# 資料庫id (taicat_image)
-# 起始 11202970
-# 台東 11572752
-# 屏東 11669672
-# 新竹
-# 羅東
-# 南投
-# 東勢
-# 花蓮
-# 嘉義
-
-# PSQL NOTES
-
-# copy from csv
-"""
-COPY taicat_image(memo, project_id, studyarea_id, deployment_id, filename, datetime, species, life_stage, sex,
-                  remarks, image_uuid, image_hash, file_url, folder_name)
-FROM '/bucket/HL.csv'
-DELIMITER ',' CSV HEADER
-
-COPY taicat_image_info(image_uuid, exif)
-FROM '/bucket/HL_info.csv'
-DELIMITER ',' CSV HEADER
-"""
-
-# update default value
-"""
-SELECT column_name, column_default
-FROM information_schema.columns
-WHERE(table_schema, table_name) = ('public', 'taicat_image')
-ORDER BY ordinal_position
-
-ALTER TABLE taicat_image ALTER COLUMN annotation SET DEFAULT '{}'
-ALTER TABLE taicat_image ALTER COLUMN exif SET DEFAULT '{}'
-ALTER TABLE taicat_image ALTER COLUMN source_data SET DEFAULT '{}'
-ALTER TABLE taicat_image ALTER COLUMN last_updated SET DEFAULT NOW()
-ALTER TABLE taicat_image ALTER COLUMN created SET DEFAULT NOW()
-ALTER TABLE taicat_image ALTER COLUMN sequence_definition SET DEFAULT ''
-ALTER TABLE taicat_image ALTER COLUMN from_mongo SET DEFAULT false
-ALTER TABLE taicat_image ALTER COLUMN count SET DEFAULT 1
-ALTER TABLE taicat_image ALTER COLUMN image_hash SET DEFAULT ''
-alter table taicat_image alter column image_hash drop not null
-ALTER TABLE taicat_image_info ALTER COLUMN source_data SET DEFAULT '{}'
-"""
-
-for location in ['台東', '屏東', '花蓮']:
+# 製作縮圖
+for location in location_map.keys():
     df = pd.read_csv(f'/Users/taibif/Documents/01-camera-trap/2020自動相機動物監測整合資料/2020-09~/{location}處-edited.csv')
     for j in df[['objectID', '檔名_mac']].drop_duplicates().index:
         p = Path(df.檔名_mac[j])
@@ -231,3 +186,22 @@ for location in ['台東', '屏東', '花蓮']:
             pass
         if j % 100 == 0:
             print(location, j)
+
+
+# upload to s3
+for location in location_map.keys():
+    thumb_p = f'C:\\Users\\taibif\\Desktop\\縮圖\\{location}處'
+    image_list = os.listdir(thumb_p) 
+    count = 0 
+    error_list = []
+    for f in image_list: 
+        count += 1
+        ret = upload_to_s3(os.path.join(thumb_p,f),f)
+        if ret.get('error'):
+            error_list += [os.path.join(thumb_p,f)]
+        if count % 1000 == 0:
+            print(count)
+    error = pd.DataFrame(error_list)
+    error.to_csv(f'error_upload_{location}.csv') # 'C:\\Users\\taibif\\Desktop\\camera-trap-tk'
+
+
