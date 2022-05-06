@@ -170,6 +170,20 @@ for location in location_map.keys():
     info_df = info_df.rename(columns={'objectID': 'image_uuid'})
     info_df.to_csv(f'/Users/taibif/Documents/GitHub/ct22-volumes/bucket/{location_map[location]}_info.csv', index=False)
 
+
+# SQL query
+
+"""
+COPY taicat_image(memo, project_id, studyarea_id, deployment_id, filename, datetime, species, life_stage, sex,
+                  remarks, image_uuid, image_hash, file_url, folder_name)
+FROM '/bucket/CY.csv'
+DELIMITER ',' CSV HEADER
+
+COPY taicat_image_info(image_uuid, exif)
+FROM '/bucket/CY_info.csv'
+DELIMITER ',' CSV HEADER
+"""
+
 # 台東 287381 屏東 96920 花蓮 126167 新竹 136338
 # 嘉義 188061 羅東 78504 南投 156486 東勢 151928
 
